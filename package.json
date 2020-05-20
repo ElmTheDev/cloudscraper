@@ -21,7 +21,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/codemanki/cloudscraper.git"
+    "url": "https://github.com/elmthedev/cloudscraper.git"
   },
   "publishConfig": {
     "registry": "http://registry.npmjs.org"
@@ -39,8 +39,9 @@
   ],
   "author": "Oleksii Sribnyi",
   "license": "MIT",
-  "homepage": "https://github.com/codemanki/cloudscraper",
+  "homepage": "https://github.com/elmthedev/cloudscraper",
   "dependencies": {
+    "cheerio": "^1.0.0-rc.3",
     "request-promise": "^4.2.4"
   },
   "devDependencies": {

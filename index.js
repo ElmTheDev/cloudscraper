@@ -1,12 +1,18 @@
 'use strict';
 
+const cheerio = require('cheerio');
 const requestModule = require('request-promise');
 const sandbox = require('./lib/sandbox');
 const decodeEmails = require('./lib/email-decode.js');
-const { getDefaultHeaders, caseless } = require('./lib/headers');
+const {
+  getDefaultHeaders,
+  caseless
+} = require('./lib/headers');
 const brotli = require('./lib/brotli');
 const crypto = require('crypto');
-const { deprecate } = require('util');
+const {
+  deprecate
+} = require('util');
 
 const {
   RequestError,
@@ -21,7 +27,7 @@ const HOST = Symbol('host');
 
 module.exports = defaults.call(requestModule);
 
-function defaults (params) {
+function defaults(params) {
   // isCloudScraper === !isRequestModule
   const isRequestModule = this === requestModule;
 
@@ -29,7 +35,9 @@ function defaults (params) {
     requester: requestModule,
     // Cookies should be enabled
     jar: requestModule.jar(),
-    headers: getDefaultHeaders({ Host: HOST }),
+    headers: getDefaultHeaders({
+      Host: HOST
+    }),
     // Reduce Cloudflare's timeout to cloudflareMaxTimeout if it is excessive
     cloudflareMaxTimeout: 30000,
     // followAllRedirects - follow non-GET HTTP 3xx responses as redirects
@@ -69,10 +77,10 @@ function defaults (params) {
   Object.defineProperty(cloudscraper, 'debug', {
     configurable: true,
     enumerable: true,
-    set (value) {
+    set(value) {
       requestModule.debug = debugging = true;
     },
-    get () {
+    get() {
       return debugging;
     }
   });
@@ -80,7 +88,7 @@ function defaults (params) {
   return cloudscraper;
 }
 
-function validateRequest (options) {
+function validateRequest(options) {
   // Prevent overwriting realEncoding in subsequent calls
   if (!('realEncoding' in options)) {
     // Can't just do the normal options.encoding || 'utf8'
@@ -112,7 +120,7 @@ function validateRequest (options) {
 
 // This function is wrapped to ensure that we get new options on first call.
 // The options object is reused in subsequent calls when calling it directly.
-function performRequest (options, isFirstRequest) {
+function performRequest(options, isFirstRequest) {
   // This should be the default export of either request or request-promise.
   const requester = options.requester;
 
@@ -128,7 +136,7 @@ function performRequest (options, isFirstRequest) {
   // If the requester is not request-promise, ensure we get a callback.
   if (typeof request.callback !== 'function') {
     throw new TypeError('Expected a callback function, got ' +
-        typeof (request.callback) + ' instead.');
+      typeof (request.callback) + ' instead.');
   }
 
   // We only need the callback from the first request.
@@ -156,7 +164,7 @@ function performRequest (options, isFirstRequest) {
 
 // The argument convention is options first where possible, options
 // always before response, and body always after response.
-function onRequestResponse (options, error, response, body) {
+function onRequestResponse(options, error, response, body) {
   const callback = options.callback;
 
   // Encoding is null so body should be a buffer object
@@ -208,7 +216,7 @@ function onRequestResponse (options, error, response, body) {
   }
 }
 
-function onCloudflareResponse (options, response, body) {
+function onCloudflareResponse(options, response, body) {
   const callback = options.callback;
 
   if (body.length < 1) {
@@ -251,7 +259,7 @@ function onCloudflareResponse (options, response, body) {
   onRequestComplete(options, response, body);
 }
 
-function detectRecaptchaVersion (body) {
+function detectRecaptchaVersion(body) {
   // New version > Dec 2019
   if (/__cf_chl_captcha_tk__=(.*)/i.test(body)) { // Test for ver2 first, as it also has ver2 fields
     return 'ver2';
@@ -263,7 +271,7 @@ function detectRecaptchaVersion (body) {
   return false;
 }
 
-function validateResponse (options, response, body) {
+function validateResponse(options, response, body) {
   // Finding captcha
   // Old version < Dec 2019
   const recaptchaVer = detectRecaptchaVersion(body);
@@ -274,21 +282,24 @@ function validateResponse (options, response, body) {
   }
 
   // Trying to find '<span class="cf-error-code">1006</span>'
-  const match = body.match(/<\w+\s+class="cf-error-code">(.*)<\/\w+>/i);
 
-  if (match) {
-    const code = parseInt(match[1]);
+  const $ = cheerio.load(body);
+  const cfErrorCode = $('[class="cf-error-code"]').text().trim();
+
+  if (cfErrorCode) {
+    const code = parseInt(cfErrorCode);
     throw new CloudflareError(code, options, response);
   }
 
   return false;
 }
 
-function onChallenge (options, response, body) {
+function onChallenge(options, response, body) {
   const callback = options.callback;
   const uri = response.request.uri;
   // The query string to send back to Cloudflare
-  const payload = { /* s, jschl_vc, pass, jschl_answer */ };
+  const payload = {
+    /* s, jschl_vc, pass, jschl_answer */ };
 
   let cause;
   let error;
@@ -311,21 +322,23 @@ function onChallenge (options, response, body) {
     payload[hiddenInputName] = match[2];
   }
 
-  match = body.match(/name="jschl_vc" value="(\w+)"/);
-  if (!match) {
+  const $ = cheerio.load(body);
+
+  let jschl_vc_value = $('[name="jschl_vc"]').attr("value");
+  if (!jschl_vc_value) {
     cause = 'challengeId (jschl_vc) extraction failed';
     return callback(new ParserError(cause, options, response));
   }
 
-  payload.jschl_vc = match[1];
+  payload.jschl_vc = jschl_vc_value;
 
-  match = body.match(/name="pass" value="(.+?)"/);
-  if (!match) {
+  let pass_value = $('[name="pass"]').attr("value");
+  if (!pass_value) {
     cause = 'Attribute (pass) value extraction failed';
     return callback(new ParserError(cause, options, response));
   }
 
-  payload.pass = match[1];
+  payload.pass = pass_value;
 
   match = body.match(/getElementById\('cf-content'\)[\s\S]+?setTimeout.+?\r?\n([\s\S]+?a\.value\s*=.+?)\r?\n(?:[^{<>]*},\s*(\d{4,}))?/);
   if (!match) {
@@ -354,7 +367,10 @@ function onChallenge (options, response, body) {
   response.challenge = match[1] + '; a.value';
 
   try {
-    const ctx = new sandbox.Context({ hostname: uri.hostname, body });
+    const ctx = new sandbox.Context({
+      hostname: uri.hostname,
+      body
+    });
     payload.jschl_answer = sandbox.eval(response.challenge, ctx);
   } catch (error) {
     error.message = 'Challenge evaluation failed: ' + error.message;
@@ -371,9 +387,13 @@ function onChallenge (options, response, body) {
   // Use the original uri as the referer and to construct the answer uri.
   options.headers.Referer = uri.href;
   // Check is form to be submitted via GET or POST
-  match = body.match(/id="challenge-form" action="(.+?)" method="(.+?)"/);
-  if (match && match[2] && match[2] === 'POST') {
-    options.uri = uri.protocol + '//' + uri.host + match[1];
+
+  let challengeForm = $('#challenge-form');
+  let challengeFormAction = challengeForm.attr('action');
+  let challengeFormMethod = challengeForm.attr('method');
+
+  if (challengeForm && challengeFormMethod[2] && challengeFormMethod[2] === 'POST') {
+    options.uri = uri.protocol + '//' + uri.host + challengeFormAction;
     // Pass the payload using body form
     options.form = payload;
     options.method = 'POST';
@@ -398,17 +418,20 @@ function onChallenge (options, response, body) {
 }
 
 // Parses the reCAPTCHA form and hands control over to the user
-function onCaptcha (options, response, body) {
+function onCaptcha(options, response, body) {
   const recaptchaVer = detectRecaptchaVersion(body);
   const isRecaptchaVer2 = recaptchaVer === 'ver2';
   const callback = options.callback;
   // UDF that has the responsibility of returning control back to cloudscraper
   const handler = options.onCaptcha;
   // The form data to send back to Cloudflare
-  const payload = { /* r|s, g-re-captcha-response */ };
+  const payload = {
+    /* r|s, g-re-captcha-response */ };
 
   let cause;
   let match;
+
+  const $ = cheerio.load(body);
 
   match = body.match(/<form(?: [^<>]*)? id=["']?challenge-form['"]?(?: [^<>]*)?>([\S\s]*?)<\/form>/);
   if (!match) {
@@ -418,21 +441,20 @@ function onCaptcha (options, response, body) {
 
   const form = match[1];
 
-  let siteKey;
   let rayId; // only for ver 2
 
   if (isRecaptchaVer2) {
-    match = body.match(/\sdata-ray=["']?([^\s"'<>&]+)/);
-    if (!match) {
+    let siteRay = $('[sdata-ray]').attr('sdata-ray');
+    if (!siteRay) {
       cause = 'Unable to find cloudflare ray id';
       return callback(new ParserError(cause, options, response));
     }
-    rayId = match[1];
+    rayId = siteRay;
   }
 
-  match = body.match(/\sdata-sitekey=["']?([^\s"'<>&]+)/);
-  if (match) {
-    siteKey = match[1];
+  let siteKey = $('[sdata-sitekey]').attr('sdata-sitekey');
+  if (siteKey) {
+    siteKey = siteKey;
   } else {
     const keys = [];
     const re = /\/recaptcha\/api2?\/(?:fallback|anchor|bframe)\?(?:[^\s<>]+&(?:amp;)?)?[Kk]=["']?([^\s"'<>&]+)/g;
@@ -470,14 +492,15 @@ function onCaptcha (options, response, body) {
   if (isRecaptchaVer2) {
     response.rayId = rayId;
 
+    let challengeForm = $('#challenge-form');
     match = body.match(/id="challenge-form" action="(.+?)" method="(.+?)"/);
-    if (!match) {
+    if (!challengeForm) {
       cause = 'Challenge form action and method extraction failed';
       return callback(new ParserError(cause, options, response));
     }
-    response.captcha.formMethod = match[2];
-    match = match[1].match(/\/(.*)/);
-    response.captcha.formActionUri = match[0];
+
+    response.captcha.formMethod = challengeForm.attr('method');
+    response.captcha.formActionUri = challengeForm.attr('action');
     payload.id = rayId;
   }
 
@@ -547,7 +570,7 @@ function onCaptcha (options, response, body) {
   }
 }
 
-function onSubmitCaptcha (options, response) {
+function onSubmitCaptcha(options, response) {
   const callback = options.callback;
   const uri = response.request.uri;
   const isRecaptchaVer2 = response.captcha.version === 'ver2';
@@ -582,7 +605,7 @@ function onSubmitCaptcha (options, response) {
   performRequest(options, false);
 }
 
-function onRedirectChallenge (options, response, body) {
+function onRedirectChallenge(options, response, body) {
   const callback = options.callback;
   const uri = response.request.uri;
 
@@ -600,7 +623,9 @@ function onRedirectChallenge (options, response, body) {
     const ctx = new sandbox.Context();
     sandbox.eval(response.challenge, ctx);
 
-    options.jar.setCookie(ctx.document.cookie, uri.href, { ignoreError: true });
+    options.jar.setCookie(ctx.document.cookie, uri.href, {
+      ignoreError: true
+    });
   } catch (error) {
     error.message = 'Cookie code evaluation failed: ' + error.message;
     return callback(new ParserError(error, options, response));
@@ -611,7 +636,7 @@ function onRedirectChallenge (options, response, body) {
   performRequest(options, false);
 }
 
-function onRequestComplete (options, response, body) {
+function onRequestComplete(options, response, body) {
   const callback = options.callback;
 
   if (typeof options.realEncoding === 'string') {

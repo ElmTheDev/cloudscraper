@@ -1,6 +1,4 @@
-# 🛑 THIS LIBRARY IS NO LONGER SUPPORTED AND IS DEPRECATED 🛑
-
-
+Revived version of Cloudscraper featuring Cheerio instead of Regex to be more precise
 
 cloudscraper
 ============
